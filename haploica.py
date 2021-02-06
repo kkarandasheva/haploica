@@ -4,7 +4,10 @@ import os
 import pandas
 import pybedtools
 import subprocess
-import tempfile
+import numpy
+import matplotlib.pyplot as plt
+plt.switch_backend('agg')
+
 
 def parse_options():
     """
@@ -153,7 +156,7 @@ def hotspot_write(df, outfile):
     return
 
 
-def tvc_hotspot(bam, hotspot, tvc, reference, errormotifs, params, bed, outdir):
+def tvc_hotspot(bam, hotspot, tvc, reference, errormotifs, params, bed, outdir, writeit):
     hotspot_write(df=hotspot, outfile=outdir+'/hotspot.vcf')
     cmd = ['python', tvc,
            '--reference-fasta', reference,
@@ -165,7 +168,7 @@ def tvc_hotspot(bam, hotspot, tvc, reference, errormotifs, params, bed, outdir):
            '--output-dir', outdir,
            '--primer-trim-bed', bed]
     devnull = open(os.devnull, 'w')
-    #subprocess.call(cmd, stdout=devnull, stderr=devnull)
+    subprocess.call(cmd, stdout=devnull, stderr=devnull)
     hotspot_out = outdir+'TSVC_variants.vcf'
     df = pandas.read_csv(hotspot_out, sep='\t', comment='#', names=['Chrom', 'Start', 'ID', 'Ref', 'Alt', 'Qual', 'Filter', 'Format', 'Info', 'Sample'])
     df[df['Info'][1].split(':')] = df['Sample'].str.split(':', expand=True)
@@ -185,8 +188,51 @@ def tvc_hotspot(bam, hotspot, tvc, reference, errormotifs, params, bed, outdir):
         else:
             df_splitted = df_splitted.append(row).reset_index(drop=True)
     df_splitted = df_splitted[df.columns]
+    df_splitted["Start"] = pandas.to_numeric(df_splitted["Start"])
+    df_splitted["DP"] = pandas.to_numeric(df_splitted["DP"])
+    df_splitted["AF"] = pandas.to_numeric(df_splitted["AF"])
     df_splitted_sorted = pandas.DataFrame(sorted(df_splitted.values, key=lambda x: int(x[2].replace('ID', ''))), columns=df.columns)
+    if writeit:
+        df_splitted_sorted.to_csv(outdir+'/hotspot.txt', sep='\t', index=False)
+
     return df_splitted_sorted
+
+
+def draw_haplotypes(hotspot, gene, outdir, sensitivity=0.05):
+    df = hotspot
+    df.loc[df.AF < sensitivity, 'AF'] = 0
+    df.loc[df.AF > (1 - sensitivity), 'AF'] = 1
+
+    if gene == 'All':
+        for gene in list(df["Chrom"].unique()):
+            d = df.loc[df['Chrom'] == gene]
+            variants = [str(x) for x in d["Start"].to_list()]
+            ref_alleles = [1] * len(variants)
+            colors = ['green' if x > 10 else 'gray' for x in d["DP"].to_list()]
+            alt_alleles = d["AF"].to_list()
+            bar_width = 0.8
+            fig, ax = plt.subplots(nrows=2, ncols=1)
+            plt.subplots_adjust(hspace=.001)
+            ax[0].bar(variants, ref_alleles, bar_width, label='Ref', color=colors)
+            ax[0].bar(variants, alt_alleles, bar_width, label='Alt', color='red')
+            ax[0].set_ylabel('AF')
+            ax[0].set_title('SNPs')
+            ax[0].set_xticklabels(variants, rotation=90, ha="center")
+            ax[0].tick_params(axis='x', which='major', labelsize=8)
+            ax[0].legend()
+            ax[1].hist(alt_alleles, numpy.arange(0,1.2,0.1) - 0.05, label='Alt', color='gray')
+            for j in [0, 0.5, 1]:
+                ax[1].axvline(j, color='black', linestyle='dashed', linewidth=1)
+            for j in [0.25, 0.75]:
+                ax[1].axvline(j, color='red', linestyle='dashed', linewidth=1)
+            ax[1].set_ylabel('Frequency')
+            ax[1].set_xlabel('AF')
+            ax[1].set_title('AF distribution')
+
+            fig.tight_layout()
+            plt.savefig(outdir + gene + '.hs.png')
+            #plt.show()
+    return
 
 
 def main(infile, outdir, format, design, paramfile, errorhandler):
@@ -209,7 +255,6 @@ def main(infile, outdir, format, design, paramfile, errorhandler):
     snv = filter_snv(snv=snv, design=design)
 
     if parameters['VC'] == "TVC":
-        k = 3
         hotspot = tvc_hotspot(bam=infile,
                     hotspot=snv,
                     tvc=parameters['TVCPATH'],
@@ -217,9 +262,9 @@ def main(infile, outdir, format, design, paramfile, errorhandler):
                     bed=parameters['TVCBED'],
                     errormotifs=parameters['TVCERR'],
                     params=parameters['TVCPAR'],
-                    outdir=outdir) # TODO: uncomment subprocess
-    k = 3
-    sample = draw_haplotypes(hotspot, gene='All')
+                    outdir=outdir,
+                    writeit=True) # TODO: uncomment subprocess
+    sample = draw_haplotypes(hotspot=hotspot, gene='All', outdir=outdir)
 
 
 if __name__ == '__main__':
