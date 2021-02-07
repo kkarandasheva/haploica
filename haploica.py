@@ -136,6 +136,9 @@ def filter_snv(snv, design):
     bt_intersect = bt_snv.intersect(bt_dsgn)
     result = bt_intersect.to_dataframe()
     result.columns = snv.columns
+    result = result.drop_duplicates()
+    result = result.loc[~result['RS'].isin(['rs759306393', 'rs3058624', 'rs200002326'])]
+
     return result
 
 
@@ -149,8 +152,8 @@ def hotspot_write(df, outfile):
     f = open(outfile, 'w')
     f.write('##fileformat=VCFv4.1\n##allowBlockSubstitutions=true\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n')
     for index, row in df.iterrows():
-        newline = [row['Chromosome'], str(row['Start']), '.', row['Ref'], row['Alt'], '.', '.',
-                   'OID=ID{};OPOS={};OREF={};OALT={};OMAPALT={}'.format(index+1, row['Start'], row['Ref'], row['Alt'], row['Alt'])]
+        newline = [row['Chromosome'], str(row['End']), '.', row['Ref'], row['Alt'], '.', '.',
+                   'OID=ID{};OPOS={};OREF={};OALT={};OMAPALT={}'.format(index+1, row['End'], row['Ref'], row['Alt'], row['Alt'])]
         newline = '\t'.join(newline) + '\n'
         f.write(newline)
     return
@@ -175,6 +178,7 @@ def tvc_hotspot(bam, hotspot, tvc, reference, errormotifs, params, bed, outdir, 
     df = df[['Chrom', 'Start', 'ID', 'Ref', 'Alt', 'Filter', 'DP', 'AF']]
     df_splitted = pandas.DataFrame(columns = df.columns)
     for _, row in df.iterrows():
+        print(row['ID'])
         if ';' in row['ID']:
             x = pandas.DataFrame({'Chrom': [row['Chrom']] * len(row['ID'].split(';')),
                                   'Start': [row['Start']] * len(row['ID'].split(';')),
